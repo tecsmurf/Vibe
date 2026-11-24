@@ -39,12 +39,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibe.musicassistant.R
 import com.vibe.musicassistant.domain.model.AssistantStatus
 import com.vibe.musicassistant.domain.model.HomeState
+import com.vibe.musicassistant.domain.model.MediaInfo
+import com.vibe.musicassistant.domain.model.VibeSettings
+import com.vibe.musicassistant.domain.model.VoiceStatus
 import com.vibe.musicassistant.domain.model.PermissionState
 import com.vibe.musicassistant.domain.model.VibePermission
 import com.vibe.musicassistant.presentation.components.GlassCard
@@ -73,8 +77,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     state: HomeState,
-    onToggleAssistant: (Boolean) -> Unit,
+    onActivate: () -> Unit,
+    onDeactivate: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenPermissions: () -> Unit,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
 ) {
     VibeBackground {
         Column(
@@ -90,13 +99,13 @@ fun HomeScreen(
             VibeButton(
                 text = if (state.assistantEnabled) "Stop VIBE" else "Activate VIBE",
                 outlined = state.assistantEnabled,
-                onClick = { onToggleAssistant(!state.assistantEnabled) },
+                onClick = { if (state.assistantEnabled) onDeactivate() else onActivate() },
             )
             ActivationHint(state)
             Spacer(Modifier.height(VibeSpacing.xl))
-            PlayerCard(state.connectedPlayer)
+            PlayerCard(state.media, onPrevious, onPlayPause, onNext)
             Spacer(Modifier.height(VibeSpacing.lg))
-            PermissionsCard(state)
+            PermissionsCard(state, onOpenPermissions)
             Spacer(Modifier.height(VibeSpacing.lg))
             PrivacyCard(onOpenSettings)
             Spacer(Modifier.height(VibeSpacing.xxl))
@@ -184,14 +193,22 @@ private fun Hero(state: HomeState) {
 
 @Composable
 private fun ActivationHint(state: HomeState) {
-    val text = when (state.status) {
+    val feedback = when (val v = state.voice) {
+        is VoiceStatus.Error -> v.message
+        is VoiceStatus.Unconfirmed -> v.message
+        is VoiceStatus.Success -> v.message
+        else -> null
+    }
+    val text = feedback ?: when (state.status) {
         AssistantStatus.NOT_ACTIVATED ->
             "Activate once, then open Spotify or YouTube Music. The orb stays with you."
         AssistantStatus.PERMISSION_REQUIRED ->
             "VIBE is on, but needs ${state.missingRequired.size} more " +
                 (if (state.missingRequired.size == 1) "permission" else "permissions") +
                 " before the orb can appear."
-        else -> "VIBE is on. Start music in any player and tap the orb to talk."
+        AssistantStatus.WAITING_FOR_MUSIC ->
+            "VIBE is on. Start music in Spotify, YouTube Music or any player, then tap the orb."
+        else -> "VIBE is on. Tap the floating orb and say \"next song\" or \"agla gaana\"."
     }
     Text(
         text = text,
@@ -205,9 +222,24 @@ private fun ActivationHint(state: HomeState) {
 }
 
 @Composable
-private fun PlayerCard(connectedPlayer: String?) {
+private fun PlayerCard(
+    media: MediaInfo?,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+) {
     GlassCard {
-        SectionLabel("Now controlling")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel("Now controlling")
+            Spacer(Modifier.weight(1f))
+            if (media != null) {
+                Text(
+                    text = media.appName.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VibeCyan,
+                )
+            }
+        }
         Spacer(Modifier.height(VibeSpacing.md))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -229,29 +261,82 @@ private fun PlayerCard(connectedPlayer: String?) {
                 )
             }
             Spacer(Modifier.width(VibeSpacing.lg))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(
-                    text = connectedPlayer ?: "No player connected",
+                    text = media?.title ?: "No player connected",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = if (connectedPlayer == null) {
-                        "Play something in Spotify, YouTube Music or another player."
-                    } else {
-                        "Ready for your voice commands."
+                    text = when {
+                        media == null -> "Play something in Spotify, YouTube Music or another player."
+                        media.artist != null -> media.artist
+                        media.isPlaying -> "Playing"
+                        else -> "Paused"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = VibeTextSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+        if (media != null) {
+            Spacer(Modifier.height(VibeSpacing.lg))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ControlButton(R.drawable.ic_skip_previous, "Previous track", onPrevious)
+                ControlButton(
+                    if (media.isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
+                    if (media.isPlaying) "Pause" else "Play",
+                    onPlayPause,
+                    primary = true,
+                )
+                ControlButton(R.drawable.ic_skip_next, "Next track", onNext)
             }
         }
     }
 }
 
 @Composable
-private fun PermissionsCard(state: HomeState) {
-    GlassCard {
+private fun ControlButton(
+    icon: Int,
+    label: String,
+    onClick: () -> Unit,
+    primary: Boolean = false,
+) {
+    Box(
+        modifier = Modifier
+            .size(if (primary) 60.dp else 48.dp)
+            .clip(CircleShape)
+            .background(
+                if (primary) Brush.linearGradient(listOf(VibeElectricBlue, VibeViolet))
+                else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.05f))),
+            )
+            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = label,
+            tint = Color.White,
+            modifier = Modifier.size(if (primary) 30.dp else 24.dp),
+        )
+    }
+}
+
+@Composable
+private fun PermissionsCard(state: HomeState, onOpenPermissions: () -> Unit) {
+    GlassCard(
+        modifier = Modifier
+            .clip(VibeShapes.card)
+            .clickable(role = Role.Button, onClickLabel = "Manage permissions", onClick = onOpenPermissions),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Permissions")
             Spacer(Modifier.weight(1f))
@@ -263,6 +348,14 @@ private fun PermissionsCard(state: HomeState) {
         }
         Spacer(Modifier.height(VibeSpacing.sm))
         state.permissions.forEach { PermissionRow(it) }
+        if (state.missingRequired.isNotEmpty()) {
+            Spacer(Modifier.height(VibeSpacing.sm))
+            Text(
+                text = "Tap to set up permissions",
+                style = MaterialTheme.typography.labelLarge,
+                color = VibeElectricBlue,
+            )
+        }
     }
 }
 
@@ -370,11 +463,16 @@ private fun HomeScreenPreview() {
     VibeTheme {
         HomeScreen(
             state = HomeState(
-                assistantEnabled = true,
+                settings = VibeSettings(assistantEnabled = true),
                 permissions = VibePermission.entries.map { PermissionState(it, it.ordinal % 2 == 0) },
             ),
-            onToggleAssistant = {},
+            onActivate = {},
+            onDeactivate = {},
             onOpenSettings = {},
+            onOpenPermissions = {},
+            onPrevious = {},
+            onPlayPause = {},
+            onNext = {},
         )
     }
 }

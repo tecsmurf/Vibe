@@ -44,6 +44,7 @@ fun VibeOrb(
     modifier: Modifier = Modifier,
     state: OrbState = OrbState.IDLE,
     diameter: Dp = 60.dp,
+    canvasScale: Float = 1.8f,
 ) {
     val transition = rememberInfiniteTransition(label = "orb")
     val phase by transition.animateFloat(
@@ -89,10 +90,11 @@ fun VibeOrb(
         label = "glowColor",
     )
 
-    Canvas(modifier = modifier.size(diameter * 1.8f)) {
+    Canvas(modifier = modifier.size(diameter * canvasScale)) {
         val pulseScale = if (state == OrbState.PROCESSING) 1f + 0.06f * breath else 1f
         val coreRadius = diameter.toPx() / 2f * pulseScale
-        val glowRadius = coreRadius * (1.45f + 0.25f * breath)
+        val maxGlow = size.minDimension / 2f
+        val glowRadius = (coreRadius * (1.45f + 0.25f * breath)).coerceAtMost(maxGlow)
 
         // Outer glow.
         drawCircle(
