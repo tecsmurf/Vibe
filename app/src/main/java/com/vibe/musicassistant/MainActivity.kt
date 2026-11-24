@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import com.vibe.musicassistant.presentation.launch.LaunchScreen
+import com.vibe.musicassistant.presentation.VibeApp
 import com.vibe.musicassistant.presentation.theme.VibeTheme
 
 class MainActivity : ComponentActivity() {
@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             VibeTheme {
-                LaunchScreen()
+                VibeApp()
             }
         }
     }

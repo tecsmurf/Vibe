@@ -20,3 +20,10 @@ val VibeTextSecondary = Color(0xFF9AA3C7)
 // Status.
 val VibeSuccess = Color(0xFF34D399)
 val VibeError = Color(0xFFFF6B81)
+val VibeWarning = Color(0xFFFBBF24)
+
+// Translucent "glass" layers used by cards and outlines.
+val VibeGlassTop = Color(0x14FFFFFF)
+val VibeGlassBottom = Color(0x06FFFFFF)
+val VibeGlassStroke = Color(0x24FFFFFF)
+val VibeGlassStrokeFaint = Color(0x08FFFFFF)
