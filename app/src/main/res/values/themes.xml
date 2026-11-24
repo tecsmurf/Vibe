@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base window theme. Compose draws the UI; this only sets window colors so there is no white flash. -->
+    <style name="Theme.Vibe" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/vibe_navy_deep</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- System splash (AndroidX SplashScreen, back-ported to API 26). -->
+    <style name="Theme.Vibe.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/vibe_navy_deep</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_vibe_orb</item>
+        <item name="postSplashScreenTheme">@style/Theme.Vibe</item>
+    </style>
+</resources>
