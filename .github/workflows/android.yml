@@ -32,13 +32,39 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-  wake-model-checksum:
-    # Records the SHA-256 of the "Hey VIBE" model archive so the app can pin it.
+  release:
+    # Signed, minified release APK. Runs only when the signing secrets are set in
+    # GitHub: Settings > Secrets and variables > Actions.
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 30
+    env:
+      HAS_KEY: ${{ secrets.VIBE_KEYSTORE_BASE64 != '' }}
     steps:
-      - name: Checksum Vosk small English model
+      - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
+      - uses: actions/setup-java@v4
+        if: env.HAS_KEY == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        if: env.HAS_KEY == 'true'
+      - name: Build signed release APK
+        if: env.HAS_KEY == 'true'
+        env:
+          VIBE_KEYSTORE_BASE64: ${{ secrets.VIBE_KEYSTORE_BASE64 }}
+          VIBE_KEYSTORE_PASSWORD: ${{ secrets.VIBE_KEYSTORE_PASSWORD }}
+          VIBE_KEY_ALIAS: ${{ secrets.VIBE_KEY_ALIAS }}
+          VIBE_KEY_PASSWORD: ${{ secrets.VIBE_KEY_PASSWORD }}
         run: |
-          curl -sSfL -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-          ls -l model.zip
-          sha256sum model.zip
+          echo "$VIBE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/vibe.jks"
+          export VIBE_KEYSTORE_PATH="$RUNNER_TEMP/vibe.jks"
+          ./gradlew --no-daemon assembleRelease
+          rm -f "$RUNNER_TEMP/vibe.jks"
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_KEY == 'true'
+        with:
+          name: vibe-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+

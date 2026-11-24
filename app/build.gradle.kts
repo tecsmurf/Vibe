@@ -19,8 +19,23 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
+    // Release signing comes from CI secrets (never committed). Without them, release
+    // builds are unsigned and only the debug APK is produced for testing.
+    val releaseKeystore = System.getenv("VIBE_KEYSTORE_PATH")
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("VIBE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("VIBE_KEY_ALIAS")
+                keyPassword = System.getenv("VIBE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

@@ -136,8 +136,8 @@ class WakeModelManager(context: Context) {
 
     private companion object {
         const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
-        /** Pinned checksum of the model archive. Empty = not yet pinned. */
-        const val MODEL_SHA256 = ""
+        /** Pinned SHA-256 of vosk-model-small-en-us-0.15.zip (41,205,931 bytes). */
+        const val MODEL_SHA256 = "30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498"
         const val EXPECTED_SIZE = 41_000_000L
         const val MAX_BYTES = 80_000_000L
         const val MAX_UNPACKED_BYTES = 200_000_000L
