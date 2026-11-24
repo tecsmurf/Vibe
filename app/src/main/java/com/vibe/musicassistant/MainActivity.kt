@@ -1,5 +1,6 @@
 package com.vibe.musicassistant
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,6 +20,8 @@ class MainActivity : ComponentActivity() {
         // Keep the splash until settings load, so onboarding never flashes for returning users.
         splash.setKeepOnScreenCondition { viewModel.state.value == null }
         enableEdgeToEdge()
+        // Anti-tapjacking: other apps can't draw over VIBE's own screens.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) window.setHideOverlayWindows(true)
         setContent {
             VibeTheme {
                 VibeApp(viewModel)

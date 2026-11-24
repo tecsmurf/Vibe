@@ -10,11 +10,60 @@ import java.util.Locale
  */
 object VibeCommandParser {
 
-    data class Match(val command: VoiceCommand, val heard: String)
+    /** [query] is set only for [VoiceCommand.PLAY_SEARCH] ("play Kesariya"). */
+    data class Match(val command: VoiceCommand, val heard: String, val query: String? = null)
 
     /** Tries each recogniser alternative in order and returns the first that parses. */
     fun parseBest(alternatives: List<String>): Match? =
-        alternatives.firstNotNullOfOrNull { text -> parse(text)?.let { Match(it, text) } }
+        alternatives.firstNotNullOfOrNull { text -> parseFull(text) }
+
+    fun parseFull(text: String): Match? {
+        // "Hey VIBE, next song" said in one breath: ignore the wake phrase.
+        val command = text.trim().replace(WAKE_PREFIX, "").trim()
+        searchQuery(command)?.let { return Match(VoiceCommand.PLAY_SEARCH, text, it) }
+        return parse(command)?.let { Match(it, text) }
+    }
+
+    private val WAKE_PREFIX = Regex("^(hey|hello|hi|ok|okay)[ ,]+vibes?[ ,.!]*", RegexOption.IGNORE_CASE)
+
+    /**
+     * Detects "play <something>" / "<something> chalao|bajao|lagao" and returns <something>,
+     * or null when the request is a plain command ("play music", "agla gaana chalao").
+     */
+    fun searchQuery(text: String): String? {
+        val original = text.lowercase(Locale.ROOT)
+            .replace(Regex("[^\\p{L}\\p{M}\\p{N}\\s']"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+            .toMutableList()
+        if (original.isEmpty()) return null
+        val roman = original.map { DEVANAGARI_WORDS[it] ?: it }.toMutableList()
+
+        // Drop politeness/auxiliary words at the end: "... chalao na", "... play karo please".
+        while (roman.size > 1 && roman.last() in TRAILING_AUX) {
+            roman.removeAt(roman.lastIndex)
+            original.removeAt(original.lastIndex)
+        }
+
+        val rest: List<String> = when {
+            roman.first() == "play" -> original.drop(1)
+            roman.size >= 2 && roman.first() == "please" && roman[1] == "play" -> original.drop(2)
+            roman.last() in PLAY_VERBS -> original.dropLast(1)
+            else -> return null
+        }
+        val restRoman = rest.map { DEVANAGARI_WORDS[it] ?: it }
+        if (restRoman.any { it in COMMAND_WORDS }) return null
+        if (restRoman.all { it in FILLER }) return null
+
+        // Trim filler from both ends: "the song kesariya" -> "kesariya".
+        var start = 0
+        var end = rest.size
+        while (start < end && restRoman[start] in EDGE_FILLER) start++
+        while (end > start && restRoman[end - 1] in EDGE_FILLER) end--
+        val query = rest.subList(start, end).joinToString(" ").trim()
+        return query.ifBlank { null }
+    }
 
     fun parse(text: String): VoiceCommand? {
         val normalized = normalize(text)
@@ -44,8 +93,9 @@ object VibeCommandParser {
             has("next", "skip", "agla", "agle", "agli", "aglaa", "change", "doosra", "dusra",
                 "dusri", "doosri") -> VoiceCommand.NEXT_TRACK
             has("previous", "prev", "pichla", "pichle", "pichli", "pichhla", "pichhle", "pichhli",
+                "picchla", "picchle", "pichala", "peechla", "peechle", "piche", "previos", "privious",
                 "back", "wapas", "vapas") || phrase("last song", "last track") -> VoiceCommand.PREVIOUS_TRACK
-            has("rewind", "peeche", "piche") -> VoiceCommand.SEEK_BACKWARD
+            has("rewind", "peeche") -> VoiceCommand.SEEK_BACKWARD
             has("pause", "stop", "band", "bandh", "ruko", "roko", "rok", "ruk", "bas", "chup",
                 "mute", "silence", "hold") -> VoiceCommand.PAUSE
             has("play", "resume", "chalao", "chala", "chalu", "chalaao", "bajao", "baja", "bajaao",
@@ -53,6 +103,23 @@ object VibeCommandParser {
             else -> null
         }
     }
+
+    private val PLAY_VERBS = setOf(
+        "chalao", "chala", "chalaao", "bajao", "baja", "bajaao", "lagao", "laga", "lagaao", "sunao", "suna", "play",
+    )
+    private val TRAILING_AUX = setOf("karo", "kar", "do", "dena", "de", "na", "please", "now", "abhi", "zara", "jara")
+    private val COMMAND_WORDS = setOf(
+        "next", "previous", "prev", "agla", "agle", "agli", "pichla", "pichle", "pichli", "picchla", "pichhla",
+        "volume", "awaaz", "skip", "forward", "rewind", "pause", "stop", "band", "bandh",
+    )
+    private val EDGE_FILLER = setOf(
+        "the", "a", "song", "songs", "gaana", "gaane", "gana", "gane", "geet", "track", "music", "ke", "ka", "ki",
+        "wala", "wale", "wali", "mera", "mere", "my", "on", "spotify", "youtube",
+    )
+    private val FILLER = EDGE_FILLER + setOf(
+        "some", "something", "it", "again", "me", "koi", "ek", "sa", "bhi", "phir", "fir", "se", "wapas", "now",
+        "abhi", "please", "this", "that", "yeh", "ye", "woh", "wo", "kuch", "acha", "accha", "achha", "nice",
+    )
 
     internal fun normalize(text: String): String {
         var t = text.lowercase(Locale.ROOT)
@@ -82,4 +149,6 @@ object VibeCommandParser {
         "वापस" to "wapas", "पीछे" to "peeche", "आगे" to "aage",
         "करो" to "karo", "कर" to "kar", "दो" to "do",
     ).sortedByDescending { it.first.length }
+
+    private val DEVANAGARI_WORDS: Map<String, String> = DEVANAGARI.toMap()
 }

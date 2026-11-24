@@ -51,6 +51,11 @@ import com.vibe.musicassistant.service.VibeRuntime
 import com.vibe.musicassistant.service.media.VibeMusicAppDetector
 import com.vibe.musicassistant.service.voice.VibeCommandParser
 import com.vibe.musicassistant.service.voice.VibeVoiceController
+import com.vibe.musicassistant.service.voice.VibeWakeWordEngine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.media.AudioManager
+import android.media.ToneGenerator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -94,6 +99,9 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
     private var resetJob: Job? = null
     private var panelJob: Job? = null
     private var snapAnimator: ValueAnimator? = null
+    private var wakeEngine: VibeWakeWordEngine? = null
+    private var wakeLoading = false
+    private var wakeResumeJob: Job? = null
 
     override fun onCreate() {
         savedStateController.performRestore(null)
@@ -116,6 +124,10 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
             }
             ACTION_SHOW_ORB -> hiddenByUser.value = false
             ACTION_RESET_POSITION -> orbView?.let { placeOrbAtDefault(); persistPosition() }
+            ACTION_REFRESH -> lifecycleScope.launch {
+                settings = app.preferences.settings.first()
+                updateWakeWord()
+            }
         }
 
         if (!Settings.canDrawOverlays(this) || !goForeground()) {
@@ -146,8 +158,11 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
         lifecycleScope.launch {
             app.preferences.settings.collect { s ->
                 settings = s
-                if (!s.assistantEnabled) stopSelf()
+                if (!s.assistantEnabled) stopSelf() else updateWakeWord()
             }
+        }
+        lifecycleScope.launch {
+            app.wakeModel.state.collect { updateWakeWord() }
         }
         // Orb visibility: user's "hide", plus "only with music" mode.
         lifecycleScope.launch {
@@ -222,7 +237,10 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_vibe)
             .setContentTitle("VIBE is on")
-            .setContentText("Tap the orb and speak to control your music.")
+            .setContentText(
+                if (wakeEngine?.isRunning == true) "Say \"Hey VIBE\" or tap the orb. The wake phrase is detected on this phone only."
+                else "Tap the orb and speak to control your music.",
+            )
             .setContentIntent(open)
             .setOngoing(true)
             .setSilent(true)
@@ -457,8 +475,14 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
         if (voice.isActive) {
             voice.cancel()
             VibeRuntime.voiceStatus.value = VoiceStatus.Idle
+            resumeWakeWordSoon()
             return
         }
+        startVoice()
+    }
+
+    private fun startVoice() {
+        stopWakeWord()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
         ) {
@@ -466,6 +490,7 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
             openApp()
             return
         }
+        wakeResumeJob?.cancel()
         VibeRuntime.voiceStatus.value = VoiceStatus.Listening()
         voice.start(settings.voiceLanguage.tag, object : VibeVoiceController.Listener {
             override fun onListening() {
@@ -485,21 +510,87 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
                 val match = VibeCommandParser.parseBest(alternatives)
                 if (match == null) {
                     VibeRuntime.voiceStatus.value = VoiceStatus.Error(
-                        "Didn't understand \"${alternatives.first()}\". Try \"next song\" or \"pause\".",
+                        "Didn't understand \"${alternatives.first()}\". Try \"next song\" or \"play Kesariya\".",
                     )
+                    resumeWakeWordSoon()
                     return
                 }
-                VibeRuntime.voiceStatus.value = VoiceStatus.Processing(match.heard)
+                VibeRuntime.voiceStatus.value = VoiceStatus.Processing(match.query ?: match.heard)
                 lifecycleScope.launch {
-                    VibeRuntime.voiceStatus.value = app.commandExecutor.execute(match.command)
+                    VibeRuntime.voiceStatus.value = app.commandExecutor.execute(match.command, match.query)
+                    resumeWakeWordSoon()
                 }
             }
 
             override fun onError(message: String) {
                 VibeRuntime.voiceStatus.value = VoiceStatus.Error(message)
+                resumeWakeWordSoon()
             }
         })
     }
+
+    // region Hands-free wake word
+
+    private fun micGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
+
+    /** Runs the on-device "Hey VIBE" spotter only when the user turned it on and nothing else uses the mic. */
+    private fun updateWakeWord() {
+        val wanted = settings.assistantEnabled && settings.wakeWordEnabled && app.wakeModel.isReady() &&
+            micGranted() && !voice.isActive
+        if (wanted) startWakeWord() else stopWakeWord()
+    }
+
+    private fun startWakeWord() {
+        if (wakeEngine?.isRunning == true || wakeLoading) return
+        wakeLoading = true
+        lifecycleScope.launch {
+            val engine = wakeEngine ?: VibeWakeWordEngine(app.wakeModel.modelPath).also { wakeEngine = it }
+            val loaded = withContext(Dispatchers.IO) { engine.load() }
+            wakeLoading = false
+            if (!loaded) {
+                VibeRuntime.voiceStatus.value = VoiceStatus.Error("Couldn't load the \"Hey VIBE\" model. Try turning it off and on.")
+                return@launch
+            }
+            if (settings.wakeWordEnabled && !voice.isActive && engine.start(::onWakeWord)) {
+                refreshNotification()
+            }
+        }
+    }
+
+    private fun stopWakeWord() {
+        if (wakeEngine?.isRunning == true) {
+            wakeEngine?.stop()
+            refreshNotification()
+        }
+    }
+
+    private fun resumeWakeWordSoon() {
+        wakeResumeJob?.cancel()
+        wakeResumeJob = lifecycleScope.launch {
+            delay(1_500)
+            updateWakeWord()
+        }
+    }
+
+    private fun onWakeWord() {
+        orbView?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        runCatching {
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 35)
+            tone.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+            handler.postDelayed({ tone.release() }, 300)
+        }
+        panelOpen.value = false
+        startVoice()
+    }
+
+    private fun refreshNotification() {
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
+        }
+    }
+
+    // endregion
 
     private fun quickCommand(command: VoiceCommand) {
         schedulePanelClose()
@@ -535,6 +626,8 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
 
     override fun onDestroy() {
         voice.cancel()
+        wakeEngine?.release()
+        wakeEngine = null
         snapAnimator?.cancel()
         handler.removeCallbacksAndMessages(null)
         orbView?.let { runCatching { windowManager.removeView(it) } }
@@ -553,6 +646,7 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
         const val ACTION_STOP = "com.vibe.musicassistant.STOP"
         const val ACTION_SHOW_ORB = "com.vibe.musicassistant.SHOW_ORB"
         const val ACTION_RESET_POSITION = "com.vibe.musicassistant.RESET_POSITION"
+        const val ACTION_REFRESH = "com.vibe.musicassistant.REFRESH"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, VibeOverlayService::class.java))
@@ -560,6 +654,16 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, VibeOverlayService::class.java))
+        }
+
+        /** Re-applies settings; from the foreground app this also re-grants the microphone type. */
+        fun refresh(context: Context) {
+            if (VibeRuntime.serviceRunning.value) {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, VibeOverlayService::class.java).setAction(ACTION_REFRESH),
+                )
+            }
         }
 
         fun resetPosition(context: Context) {

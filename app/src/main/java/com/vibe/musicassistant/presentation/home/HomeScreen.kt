@@ -60,6 +60,7 @@ import com.vibe.musicassistant.presentation.components.VibeButton
 import com.vibe.musicassistant.presentation.components.VibeIconButton
 import com.vibe.musicassistant.presentation.components.VibeOrb
 import com.vibe.musicassistant.presentation.components.VibeWordmark
+import com.vibe.musicassistant.presentation.components.WakeWordCard
 import com.vibe.musicassistant.presentation.components.orbState
 import com.vibe.musicassistant.presentation.theme.VibeCyan
 import com.vibe.musicassistant.presentation.theme.VibeElectricBlue
@@ -84,6 +85,8 @@ fun HomeScreen(
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onWakeWord: (Boolean) -> Unit,
+    onRetryWakeModel: () -> Unit,
 ) {
     VibeBackground {
         Column(
@@ -104,6 +107,14 @@ fun HomeScreen(
             ActivationHint(state)
             Spacer(Modifier.height(VibeSpacing.xl))
             PlayerCard(state.media, onPrevious, onPlayPause, onNext)
+            Spacer(Modifier.height(VibeSpacing.lg))
+            WakeWordCard(
+                enabled = state.settings.wakeWordEnabled,
+                assistantOn = state.assistantEnabled,
+                model = state.wakeModel,
+                onToggle = onWakeWord,
+                onRetry = onRetryWakeModel,
+            )
             Spacer(Modifier.height(VibeSpacing.lg))
             PermissionsCard(state, onOpenPermissions)
             Spacer(Modifier.height(VibeSpacing.lg))
@@ -473,6 +484,8 @@ private fun HomeScreenPreview() {
             onPrevious = {},
             onPlayPause = {},
             onNext = {},
+            onWakeWord = {},
+            onRetryWakeModel = {},
         )
     }
 }

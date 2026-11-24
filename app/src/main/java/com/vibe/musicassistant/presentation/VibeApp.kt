@@ -111,6 +111,8 @@ fun VibeApp(viewModel: HomeViewModel) {
                 onPrevious = { viewModel.mediaCommand(VoiceCommand.PREVIOUS_TRACK) },
                 onPlayPause = viewModel::togglePlayPause,
                 onNext = { viewModel.mediaCommand(VoiceCommand.NEXT_TRACK) },
+                onWakeWord = { on -> if (!viewModel.setWakeWord(on)) screen = Screen.PERMISSIONS },
+                onRetryWakeModel = viewModel::retryWakeModel,
             )
             Screen.SETTINGS -> SettingsScreen(
                 state = state,

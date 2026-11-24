@@ -58,3 +58,35 @@ class VibeCommandParserTest {
         assertNull(VibeCommandParser.parseBest(listOf("hello")))
     }
 }
+
+class VibeSearchParserTest {
+    private fun query(text: String) = VibeCommandParser.parseFull(text)
+
+    @Test fun playsSpecificSongs() {
+        assertEquals("despacito", query("Play Despacito")?.query)
+        assertEquals("kesariya", query("kesariya chalao")?.query)
+        assertEquals("tum hi ho", query("tum hi ho gaana bajao")?.query)
+        assertEquals("arijit singh", query("play songs by arijit singh")?.query?.removePrefix("by "))
+        assertEquals("shape of you", query("hey vibe play shape of you")?.query)
+        assertEquals(VoiceCommand.PLAY_SEARCH, query("play believer by imagine dragons")?.command)
+    }
+
+    @Test fun plainCommandsAreNotSearches() {
+        assertEquals(PLAY, query("play music")?.command)
+        assertEquals(PLAY, query("play")?.command)
+        assertEquals(PLAY, query("music chalao")?.command)
+        assertEquals(NEXT_TRACK, query("play the next song")?.command)
+        assertEquals(NEXT_TRACK, query("agla gaana chalao")?.command)
+        assertEquals(PREVIOUS_TRACK, query("pichla gaana chalao")?.command)
+        assertEquals(PREVIOUS_TRACK, query("hey vibe previous song")?.command)
+        assertEquals(PAUSE, query("gaana band karo")?.command)
+        assertEquals(PLAY, query("play it again")?.command)
+    }
+
+    @Test fun wakePhraseDetection() {
+        assertEquals(true, com.vibe.musicassistant.service.voice.VibeWakeWordEngine.isWakePhrase("hey vibe"))
+        assertEquals(true, com.vibe.musicassistant.service.voice.VibeWakeWordEngine.isWakePhrase("hello vibe"))
+        assertEquals(false, com.vibe.musicassistant.service.voice.VibeWakeWordEngine.isWakePhrase("vibe"))
+        assertEquals(false, com.vibe.musicassistant.service.voice.VibeWakeWordEngine.isWakePhrase("[unk]"))
+    }
+}

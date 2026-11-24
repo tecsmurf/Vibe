@@ -34,6 +34,7 @@ class VibePreferencesRepository(context: Context) {
                     ?: OrbVisibility.ALWAYS,
                 voiceLanguage = p[VOICE_LANGUAGE]?.let { runCatching { VoiceLanguage.valueOf(it) }.getOrNull() }
                     ?: VoiceLanguage.ENGLISH_HINGLISH,
+                wakeWordEnabled = p[WAKE_WORD] ?: false,
                 orbX = p[ORB_X] ?: -1,
                 orbY = p[ORB_Y] ?: -1,
             )
@@ -43,6 +44,7 @@ class VibePreferencesRepository(context: Context) {
     suspend fun setAssistantEnabled(enabled: Boolean) = dataStore.edit { it[ENABLED] = enabled }
     suspend fun setOnboardingDone() = dataStore.edit { it[ONBOARDING_DONE] = true }
     suspend fun setOrbVisibility(value: OrbVisibility) = dataStore.edit { it[ORB_VISIBILITY] = value.name }
+    suspend fun setWakeWordEnabled(enabled: Boolean) = dataStore.edit { it[WAKE_WORD] = enabled }
     suspend fun setVoiceLanguage(value: VoiceLanguage) = dataStore.edit { it[VOICE_LANGUAGE] = value.name }
 
     suspend fun setOrbPosition(x: Int, y: Int) = dataStore.edit {
@@ -55,6 +57,7 @@ class VibePreferencesRepository(context: Context) {
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
         val ORB_VISIBILITY = stringPreferencesKey("orb_visibility")
         val VOICE_LANGUAGE = stringPreferencesKey("voice_language")
+        val WAKE_WORD = booleanPreferencesKey("wake_word_enabled")
         val ORB_X = intPreferencesKey("orb_x")
         val ORB_Y = intPreferencesKey("orb_y")
     }

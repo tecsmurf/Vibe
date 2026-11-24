@@ -12,8 +12,11 @@ android {
         applicationId = "com.vibe.musicassistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.1.0"
+
+        // Phones only: keeps the APK small (Vosk ships native code per CPU type).
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     buildTypes {
@@ -35,6 +38,10 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        jniLibs { useLegacyPackaging = false }
+    }
 }
 
 kotlin {
@@ -50,6 +57,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.vosk.android)
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

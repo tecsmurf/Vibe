@@ -1,7 +1,12 @@
 package com.vibe.musicassistant.service.media
 
+import android.app.SearchManager
+import android.content.Context
+import android.content.Intent
 import android.media.session.MediaController
 import android.media.session.PlaybackState
+import android.os.Bundle
+import android.provider.MediaStore
 import android.view.KeyEvent
 import com.vibe.musicassistant.domain.model.MediaInfo
 import com.vibe.musicassistant.domain.model.VoiceCommand
@@ -15,11 +20,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  * afterwards. Returns [VoiceStatus.Success] only when the change is observed.
  */
 class VibeCommandExecutor(
+    context: Context,
     private val media: VibeMediaRepository,
     private val volume: VibeVolumeController,
 ) {
-    suspend fun execute(command: VoiceCommand): VoiceStatus = when (command) {
+    private val appContext = context.applicationContext
+
+    suspend fun execute(command: VoiceCommand, query: String? = null): VoiceStatus = when (command) {
         VoiceCommand.VOLUME_UP, VoiceCommand.VOLUME_DOWN -> adjustVolume(command == VoiceCommand.VOLUME_UP)
+        VoiceCommand.PLAY_SEARCH ->
+            if (query.isNullOrBlank()) controlPlayer(VoiceCommand.PLAY) else playSearch(query.take(MAX_QUERY))
         else -> controlPlayer(command)
     }
 
@@ -52,22 +62,25 @@ class VibeCommandExecutor(
         val app = before.appName
 
         return when (command) {
-            VoiceCommand.NEXT_TRACK, VoiceCommand.PREVIOUS_TRACK -> {
-                val next = command == VoiceCommand.NEXT_TRACK
-                send(
-                    controller,
-                    if (next) PlaybackState.ACTION_SKIP_TO_NEXT else PlaybackState.ACTION_SKIP_TO_PREVIOUS,
-                    if (next) KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS,
-                ) { if (next) it.skipToNext() else it.skipToPrevious() }
-                val changed = awaitChange {
-                    it.trackKey != before.trackKey || it.positionMs + 2_000 < before.positionMs
+            VoiceCommand.NEXT_TRACK -> {
+                send(controller, PlaybackState.ACTION_SKIP_TO_NEXT, KeyEvent.KEYCODE_MEDIA_NEXT) { it.skipToNext() }
+                val changed = awaitChange { it.trackKey != before.trackKey }
+                if (changed != null) VoiceStatus.Success(listOfNotNull("Next track", changed.title).joinToString(" · "))
+                else VoiceStatus.Unconfirmed("Sent \"Next track\" to $app, but it didn't confirm")
+            }
+
+            VoiceCommand.PREVIOUS_TRACK -> {
+                // Most players (Spotify, YouTube Music) restart the current song on the first
+                // "previous" if it has played for a few seconds. Press again to really go back.
+                val previous: (MediaController.TransportControls) -> Unit = { it.skipToPrevious() }
+                send(controller, PlaybackState.ACTION_SKIP_TO_PREVIOUS, KeyEvent.KEYCODE_MEDIA_PREVIOUS, previous)
+                var changed = awaitChange(FIRST_PREVIOUS_WAIT_MS) { it.trackKey != before.trackKey }
+                if (changed == null) {
+                    send(controller, PlaybackState.ACTION_SKIP_TO_PREVIOUS, KeyEvent.KEYCODE_MEDIA_PREVIOUS, previous)
+                    changed = awaitChange { it.trackKey != before.trackKey }
                 }
-                val label = if (next) "Next track" else "Previous track"
-                if (changed != null) {
-                    VoiceStatus.Success(listOfNotNull(label, changed.title).joinToString(" · "))
-                } else {
-                    VoiceStatus.Unconfirmed("Sent \"$label\" to $app, but it didn't confirm")
-                }
+                if (changed != null) VoiceStatus.Success(listOfNotNull("Previous track", changed.title).joinToString(" · "))
+                else VoiceStatus.Unconfirmed("$app restarted the song but didn't go back. It may be the first song in the queue.")
             }
 
             VoiceCommand.PLAY -> {
@@ -86,7 +99,7 @@ class VibeCommandExecutor(
 
             VoiceCommand.SEEK_FORWARD, VoiceCommand.SEEK_BACKWARD -> seek(controller, before, command)
 
-            VoiceCommand.VOLUME_UP, VoiceCommand.VOLUME_DOWN -> error("handled above")
+            VoiceCommand.VOLUME_UP, VoiceCommand.VOLUME_DOWN, VoiceCommand.PLAY_SEARCH -> error("handled above")
         }
     }
 
@@ -109,7 +122,46 @@ class VibeCommandExecutor(
      * Uses the session's transport control when it advertises [action]; otherwise falls back
      * to a media-button key event, which many players still honour.
      */
-    private inline fun send(
+    /**
+     * Plays a specific song. Uses the session's play-from-search when the player offers it;
+     * otherwise sends the standard "play from search" request to that player (or to an
+     * installed Spotify / YouTube Music). The query only ever goes to a music player.
+     */
+    private suspend fun playSearch(query: String): VoiceStatus {
+        media.refresh()
+        val controller = media.activeController()
+        val before = media.current.value
+        val actions = controller?.playbackState?.actions ?: 0L
+
+        if (controller != null && (actions and PlaybackState.ACTION_PLAY_FROM_SEARCH) != 0L) {
+            controller.transportControls.playFromSearch(query, Bundle())
+            val started = awaitChange(SEARCH_WAIT_MS) { it.isPlaying && it.trackKey != before?.trackKey }
+            return if (started != null) VoiceStatus.Success("Playing ${started.title ?: query}")
+            else VoiceStatus.Unconfirmed("Asked ${before?.appName ?: "the player"} to play \"$query\"")
+        }
+
+        val target = listOfNotNull(controller?.packageName) + PREFERRED_PLAYERS
+        val intent = target.firstNotNullOfOrNull { pkg ->
+            Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                .setPackage(pkg)
+                .putExtra(SearchManager.QUERY, query)
+                .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .takeIf { it.resolveActivity(appContext.packageManager) != null }
+        } ?: return VoiceStatus.Error("Your music app doesn't support playing a song by name. Try Spotify or YouTube Music.")
+
+        val appName = media.appLabel(intent.`package` ?: "")
+        try {
+            appContext.startActivity(intent)
+        } catch (e: Exception) {
+            return VoiceStatus.Error("Couldn't open $appName to play \"$query\"")
+        }
+        val started = awaitChange(SEARCH_WAIT_MS) { it.isPlaying && it.trackKey != before?.trackKey }
+        return if (started != null) VoiceStatus.Success("Playing ${started.title ?: query}")
+        else VoiceStatus.Unconfirmed("Opened $appName for \"$query\"")
+    }
+
+    private fun send(
         controller: MediaController,
         action: Long,
         keyCode: Int,
@@ -124,13 +176,27 @@ class VibeCommandExecutor(
         }
     }
 
-    private suspend fun awaitChange(predicate: (MediaInfo) -> Boolean): MediaInfo? =
-        withTimeoutOrNull(VERIFY_TIMEOUT_MS) {
+    private suspend fun awaitChange(
+        timeoutMs: Long = VERIFY_TIMEOUT_MS,
+        predicate: (MediaInfo) -> Boolean,
+    ): MediaInfo? =
+        withTimeoutOrNull(timeoutMs) {
             media.current.filterNotNull().first(predicate)
         }
 
     private companion object {
         const val VERIFY_TIMEOUT_MS = 3_000L
         const val SEEK_MS = 15_000L
+        const val FIRST_PREVIOUS_WAIT_MS = 1_500L
+        const val SEARCH_WAIT_MS = 8_000L
+        const val MAX_QUERY = 120
+        val PREFERRED_PLAYERS = listOf(
+            "com.spotify.music",
+            "com.google.android.apps.youtube.music",
+            "com.jio.media.jiobeats",
+            "com.bsbportal.music",
+            "com.gaana",
+            "com.amazon.mp3",
+        )
     }
 }

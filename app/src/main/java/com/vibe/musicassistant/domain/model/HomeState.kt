@@ -7,6 +7,7 @@ data class HomeState(
     val media: MediaInfo? = null,
     val voice: VoiceStatus = VoiceStatus.Idle,
     val serviceRunning: Boolean = false,
+    val wakeModel: WakeModelState = WakeModelState.NotDownloaded,
 ) {
     val assistantEnabled: Boolean get() = settings.assistantEnabled
 

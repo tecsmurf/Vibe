@@ -2,6 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+        Security notes: only the launcher activity and the notification listener are
+        exported. The listener is protected by BIND_NOTIFICATION_LISTENER_SERVICE so only
+        the system can bind it. The overlay service is not exported, and every
+        PendingIntent is explicit and immutable.
+    -->
+
     <!-- Floating orb. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Tap-to-talk voice commands (only after the user taps the orb). -->
@@ -12,6 +19,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- Status notification with a Stop button (Android 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Only for the one-time "Hey VIBE" model download (HTTPS only, see network_security_config). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Hides other apps' overlays while VIBE's own screens are open (anti-tapjacking). -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
     <!-- Optional: notice when a music app is opened (user grants in Usage access settings). -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
@@ -30,6 +41,10 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.APP_MUSIC" />
         </intent>
+        <!-- "Play <song>" hand-off to music players. -->
+        <intent>
+            <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -39,6 +54,10 @@
     <application
         android:name=".VibeApplication"
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
@@ -49,6 +68,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:excludeFromRecents="false"
             android:theme="@style/Theme.Vibe.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -9,6 +9,7 @@ import com.vibe.musicassistant.domain.model.OrbVisibility
 import com.vibe.musicassistant.domain.model.VoiceCommand
 import com.vibe.musicassistant.domain.model.VoiceLanguage
 import com.vibe.musicassistant.domain.model.VoiceStatus
+import com.vibe.musicassistant.domain.model.VibePermission
 import com.vibe.musicassistant.service.VibeRuntime
 import com.vibe.musicassistant.service.overlay.VibeOverlayService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,13 +28,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** Null until settings have loaded, so the splash screen can wait for it. */
     val state: StateFlow<HomeState?> =
         combine(
-            app.preferences.settings,
-            permissions,
-            app.mediaRepository.current,
+            combine(app.preferences.settings, permissions, app.mediaRepository.current, ::Triple),
             VibeRuntime.voiceStatus,
             VibeRuntime.serviceRunning,
-        ) { settings, perms, media, voice, running ->
-            HomeState(settings, perms, media, voice, running)
+            app.wakeModel.state,
+        ) { (settings, perms, media), voice, running, wake ->
+            HomeState(settings, perms, media, voice, running, wake)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /** Called whenever the app comes to the foreground. */
@@ -72,6 +72,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setOrbVisibility(value: OrbVisibility) {
         viewModelScope.launch { app.preferences.setOrbVisibility(value) }
+    }
+
+    /**
+     * Turns hands-free "Hey VIBE" on or off. Returns false when the microphone permission
+     * is missing. The first time, this downloads the small on-device model (~40 MB).
+     */
+    fun setWakeWord(enabled: Boolean): Boolean {
+        if (enabled && !app.permissions.isGranted(VibePermission.MICROPHONE)) return false
+        viewModelScope.launch {
+            app.preferences.setWakeWordEnabled(enabled)
+            VibeOverlayService.refresh(app)
+        }
+        if (enabled) retryWakeModel()
+        return true
+    }
+
+    fun retryWakeModel() {
+        app.appScope.launch {
+            if (app.wakeModel.download()) VibeOverlayService.refresh(app)
+        }
     }
 
     fun setVoiceLanguage(value: VoiceLanguage) {

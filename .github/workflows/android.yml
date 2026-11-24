@@ -31,3 +31,14 @@ jobs:
           name: vibe-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  wake-model-checksum:
+    # Records the SHA-256 of the "Hey VIBE" model archive so the app can pin it.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checksum Vosk small English model
+        run: |
+          curl -sSfL -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+          ls -l model.zip
+          sha256sum model.zip
