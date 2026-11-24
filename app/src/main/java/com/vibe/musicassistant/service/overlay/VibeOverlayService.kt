@@ -48,6 +48,7 @@ import com.vibe.musicassistant.domain.model.VoiceCommand
 import com.vibe.musicassistant.domain.model.VoiceStatus
 import com.vibe.musicassistant.presentation.theme.VibeTheme
 import com.vibe.musicassistant.service.VibeRuntime
+import com.vibe.musicassistant.service.VibeDiagnostics
 import com.vibe.musicassistant.service.media.VibeMusicAppDetector
 import com.vibe.musicassistant.service.voice.VibeCommandParser
 import com.vibe.musicassistant.service.voice.VibeVoiceController
@@ -205,8 +206,10 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
         val withoutMic = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         return try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, withMic)
+            VibeDiagnostics.log("service", "Foreground started (microphone type: ${micGranted || Build.VERSION.SDK_INT < 30})")
             true
         } catch (e: Exception) {
+            VibeDiagnostics.log("service", "Microphone foreground type refused: ${e.javaClass.simpleName}. Hey VIBE needs the app opened once.")
             // Android may refuse the microphone type when started from the background
             // (for example after the system restarts the service). Keep the orb anyway.
             runCatching { ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, withoutMic) }.isSuccess
@@ -492,6 +495,7 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
         }
         wakeResumeJob?.cancel()
         VibeRuntime.voiceStatus.value = VoiceStatus.Listening()
+        VibeDiagnostics.log("voice", "Listening (${settings.voiceLanguage.tag}), recognizer available=${voice.isAvailable()}")
         voice.start(settings.voiceLanguage.tag, object : VibeVoiceController.Listener {
             override fun onListening() {
                 VibeRuntime.voiceStatus.value = VoiceStatus.Listening()
@@ -507,7 +511,13 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
             }
 
             override fun onResults(alternatives: List<String>) {
+                VibeDiagnostics.log("voice", "Heard: ${alternatives.joinToString(" | ") { "\"$it\"" }}")
                 val match = VibeCommandParser.parseBest(alternatives)
+                VibeDiagnostics.log(
+                    "parse",
+                    match?.let { "${it.command.name}${it.query?.let { q -> " query=\"$q\"" } ?: ""} from \"${it.heard}\"" }
+                        ?: "No command matched",
+                )
                 if (match == null) {
                     VibeRuntime.voiceStatus.value = VoiceStatus.Error(
                         "Didn't understand \"${alternatives.first()}\". Try \"next song\" or \"play Kesariya\".",
@@ -523,6 +533,7 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
             }
 
             override fun onError(message: String) {
+                VibeDiagnostics.log("voice", "Error: $message")
                 VibeRuntime.voiceStatus.value = VoiceStatus.Error(message)
                 resumeWakeWordSoon()
             }
@@ -538,6 +549,12 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
     private fun updateWakeWord() {
         val wanted = settings.assistantEnabled && settings.wakeWordEnabled && app.wakeModel.isReady() &&
             micGranted() && !voice.isActive
+        if (settings.wakeWordEnabled && !wanted && !voice.isActive) {
+            VibeDiagnostics.log(
+                "wake",
+                "Not listening: assistantOn=${settings.assistantEnabled} modelReady=${app.wakeModel.isReady()} mic=${micGranted()}",
+            )
+        }
         if (wanted) startWakeWord() else stopWakeWord()
     }
 
@@ -548,12 +565,15 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
             val engine = wakeEngine ?: VibeWakeWordEngine(app.wakeModel.modelPath).also { wakeEngine = it }
             val loaded = withContext(Dispatchers.IO) { engine.load() }
             wakeLoading = false
+            VibeDiagnostics.log("wake", "Model load ${if (loaded) "ok" else "FAILED"}")
             if (!loaded) {
                 VibeRuntime.voiceStatus.value = VoiceStatus.Error("Couldn't load the \"Hey VIBE\" model. Try turning it off and on.")
                 return@launch
             }
-            if (settings.wakeWordEnabled && !voice.isActive && engine.start(::onWakeWord)) {
-                refreshNotification()
+            if (settings.wakeWordEnabled && !voice.isActive) {
+                val started = engine.start(::onWakeWord)
+                VibeDiagnostics.log("wake", if (started) "Listening for \"Hey VIBE\"" else "Couldn't open the microphone for Hey VIBE")
+                if (started) refreshNotification()
             }
         }
     }
@@ -574,6 +594,7 @@ class VibeOverlayService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     private fun onWakeWord() {
+        VibeDiagnostics.log("wake", "Wake phrase detected")
         orbView?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         runCatching {
             val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 35)

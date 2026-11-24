@@ -2,6 +2,7 @@ package com.vibe.musicassistant.service.voice
 
 import android.content.Context
 import com.vibe.musicassistant.domain.model.WakeModelState
+import com.vibe.musicassistant.service.VibeDiagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,12 +50,15 @@ class WakeModelManager(context: Context) {
                 modelDir.deleteRecursively()
                 if (!staging.renameTo(modelDir)) throw IllegalStateException("move failed")
                 File(modelDir, READY_MARKER).writeText(MODEL_SHA256)
+                VibeDiagnostics.log("wake", "Model downloaded and verified")
                 _state.value = WakeModelState.Ready
                 true
             } catch (e: SecurityException) {
+                VibeDiagnostics.log("wake", "Model download rejected: ${e.message}")
                 _state.value = WakeModelState.Failed("The downloaded voice model failed its safety check, so it was deleted.")
                 false
             } catch (e: Exception) {
+                VibeDiagnostics.log("wake", "Model download failed: ${e.javaClass.simpleName} ${e.message}")
                 _state.value = WakeModelState.Failed("Download failed. Check your internet and try again.")
                 false
             } finally {

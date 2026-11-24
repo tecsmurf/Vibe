@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import com.vibe.musicassistant.domain.model.MediaInfo
+import com.vibe.musicassistant.service.VibeDiagnostics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -66,6 +67,7 @@ class VibeMediaRepository(context: Context) {
         val sessions = try {
             manager.getActiveSessions(listenerComponent)
         } catch (e: SecurityException) {
+            if (_hasAccess.value) VibeDiagnostics.log("media", "No notification access: can't see players")
             _hasAccess.value = false
             select(null)
             return
@@ -80,6 +82,16 @@ class VibeMediaRepository(context: Context) {
     }
 
     fun activeController(): MediaController? = controller
+
+    fun describeSessions(): String {
+        val sessions = runCatching { sessionManager?.getActiveSessions(listenerComponent) }.getOrNull()
+            ?: return "unavailable (no notification access)"
+        if (sessions.isEmpty()) return "none"
+        return sessions.joinToString("; ") {
+            "${it.packageName} ${VibeDiagnostics.describeState(it.playbackState?.state)} " +
+                "[${VibeDiagnostics.describeActions(it.playbackState?.actions ?: 0L)}]"
+        }
+    }
 
     private fun onSessionsChanged(sessions: List<MediaController>) {
         // Prefer whatever is playing; otherwise stay with the player we had; otherwise the

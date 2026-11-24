@@ -29,9 +29,10 @@ import com.vibe.musicassistant.presentation.home.HomeScreen
 import com.vibe.musicassistant.presentation.home.HomeViewModel
 import com.vibe.musicassistant.presentation.onboarding.OnboardingScreen
 import com.vibe.musicassistant.presentation.onboarding.PermissionsScreen
+import com.vibe.musicassistant.presentation.settings.DiagnosticsScreen
 import com.vibe.musicassistant.presentation.settings.SettingsScreen
 
-private enum class Screen { HOME, SETTINGS, PERMISSIONS }
+private enum class Screen { HOME, SETTINGS, PERMISSIONS, DIAGNOSTICS }
 
 /** Root composable: routing, permission requests and wiring to the view model. */
 @Composable
@@ -90,12 +91,14 @@ fun VibeApp(viewModel: HomeViewModel) {
         return
     }
 
-    BackHandler(enabled = screen != Screen.HOME) { screen = Screen.HOME }
+    BackHandler(enabled = screen != Screen.HOME) {
+        screen = if (screen == Screen.DIAGNOSTICS) Screen.SETTINGS else Screen.HOME
+    }
 
     AnimatedContent(
         targetState = screen,
         transitionSpec = {
-            val forward = targetState != Screen.HOME
+            val forward = targetState.ordinal > initialState.ordinal
             (slideInHorizontally { if (forward) it / 4 else -it / 4 } + fadeIn()) togetherWith
                 (slideOutHorizontally { if (forward) -it / 4 else it / 4 } + fadeOut())
         },
@@ -122,7 +125,14 @@ fun VibeApp(viewModel: HomeViewModel) {
                 onResetOrb = viewModel::resetOrbPosition,
                 onOpenPermissions = { screen = Screen.PERMISSIONS },
                 onOpenBattery = { app.permissions.open(context, app.permissions.batteryIntent()) },
+                onOpenDiagnostics = { screen = Screen.DIAGNOSTICS },
                 onBack = { screen = Screen.HOME },
+            )
+            Screen.DIAGNOSTICS -> DiagnosticsScreen(
+                summary = viewModel::diagnosticsSummary,
+                fullText = viewModel::diagnosticsText,
+                onClear = viewModel::clearDiagnostics,
+                onBack = { screen = Screen.SETTINGS },
             )
             Screen.PERMISSIONS -> PermissionsScreen(
                 state = state,

@@ -53,6 +53,7 @@ fun SettingsScreen(
     onResetOrb: () -> Unit,
     onOpenPermissions: () -> Unit,
     onOpenBattery: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -146,6 +147,11 @@ fun SettingsScreen(
                     "If the orb disappears after a while, set VIBE to \"Unrestricted\" or \"Don't optimize\".",
                     onOpenBattery,
                 )
+                LinkRow(
+                    "Diagnostics",
+                    "See what VIBE heard and what your music app allowed. Use it when a command doesn't work.",
+                    onOpenDiagnostics,
+                )
             }
 
             GlassCard {
@@ -211,6 +217,6 @@ private fun PrivacyPoint(text: String) {
 @Composable
 private fun SettingsPreview() {
     VibeTheme {
-        SettingsScreen(HomeState(), {}, {}, {}, {}, {}, {}, {})
+        SettingsScreen(HomeState(), {}, {}, {}, {}, {}, {}, {}, {})
     }
 }

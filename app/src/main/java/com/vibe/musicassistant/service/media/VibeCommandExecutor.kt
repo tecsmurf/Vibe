@@ -11,6 +11,7 @@ import android.view.KeyEvent
 import com.vibe.musicassistant.domain.model.MediaInfo
 import com.vibe.musicassistant.domain.model.VoiceCommand
 import com.vibe.musicassistant.domain.model.VoiceStatus
+import com.vibe.musicassistant.service.VibeDiagnostics
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -26,7 +27,14 @@ class VibeCommandExecutor(
 ) {
     private val appContext = context.applicationContext
 
-    suspend fun execute(command: VoiceCommand, query: String? = null): VoiceStatus = when (command) {
+    suspend fun execute(command: VoiceCommand, query: String? = null): VoiceStatus {
+        VibeDiagnostics.log("cmd", "Run ${command.name}${query?.let { " query=\"$it\"" } ?: ""}")
+        val result = run(command, query)
+        VibeDiagnostics.log("cmd", "Result: $result")
+        return result
+    }
+
+    private suspend fun run(command: VoiceCommand, query: String?): VoiceStatus = when (command) {
         VoiceCommand.VOLUME_UP, VoiceCommand.VOLUME_DOWN -> adjustVolume(command == VoiceCommand.VOLUME_UP)
         VoiceCommand.PLAY_SEARCH ->
             if (query.isNullOrBlank()) controlPlayer(VoiceCommand.PLAY) else playSearch(query.take(MAX_QUERY))
@@ -60,6 +68,11 @@ class VibeCommandExecutor(
             }
         }
         val app = before.appName
+        VibeDiagnostics.log(
+            "player",
+            "${controller.packageName} state=${VibeDiagnostics.describeState(controller.playbackState?.state)} " +
+                "actions=${VibeDiagnostics.describeActions(controller.playbackState?.actions ?: 0L)} track=\"${before.title}\"",
+        )
 
         return when (command) {
             VoiceCommand.NEXT_TRACK -> {
@@ -75,6 +88,7 @@ class VibeCommandExecutor(
                 val previous: (MediaController.TransportControls) -> Unit = { it.skipToPrevious() }
                 send(controller, PlaybackState.ACTION_SKIP_TO_PREVIOUS, KeyEvent.KEYCODE_MEDIA_PREVIOUS, previous)
                 var changed = awaitChange(FIRST_PREVIOUS_WAIT_MS) { it.trackKey != before.trackKey }
+                VibeDiagnostics.log("player", "Previous #1 -> ${if (changed != null) "track changed" else "same track (restart?)"}")
                 if (changed == null) {
                     send(controller, PlaybackState.ACTION_SKIP_TO_PREVIOUS, KeyEvent.KEYCODE_MEDIA_PREVIOUS, previous)
                     changed = awaitChange { it.trackKey != before.trackKey }
@@ -119,10 +133,6 @@ class VibeCommandExecutor(
     }
 
     /**
-     * Uses the session's transport control when it advertises [action]; otherwise falls back
-     * to a media-button key event, which many players still honour.
-     */
-    /**
      * Plays a specific song. Uses the session's play-from-search when the player offers it;
      * otherwise sends the standard "play from search" request to that player (or to an
      * installed Spotify / YouTube Music). The query only ever goes to a music player.
@@ -133,7 +143,12 @@ class VibeCommandExecutor(
         val before = media.current.value
         val actions = controller?.playbackState?.actions ?: 0L
 
+        VibeDiagnostics.log(
+            "search",
+            "player=${controller?.packageName ?: "none"} actions=${VibeDiagnostics.describeActions(actions)}",
+        )
         if (controller != null && (actions and PlaybackState.ACTION_PLAY_FROM_SEARCH) != 0L) {
+            VibeDiagnostics.log("search", "Using session playFromSearch")
             controller.transportControls.playFromSearch(query, Bundle())
             val started = awaitChange(SEARCH_WAIT_MS) { it.isPlaying && it.trackKey != before?.trackKey }
             return if (started != null) VoiceStatus.Success("Playing ${started.title ?: query}")
@@ -151,6 +166,7 @@ class VibeCommandExecutor(
         } ?: return VoiceStatus.Error("Your music app doesn't support playing a song by name. Try Spotify or YouTube Music.")
 
         val appName = media.appLabel(intent.`package` ?: "")
+        VibeDiagnostics.log("search", "Using play-from-search intent -> ${intent.`package`}")
         try {
             appContext.startActivity(intent)
         } catch (e: Exception) {
@@ -161,6 +177,10 @@ class VibeCommandExecutor(
         else VoiceStatus.Unconfirmed("Opened $appName for \"$query\"")
     }
 
+    /**
+     * Uses the session's transport control when it advertises [action]; otherwise falls back
+     * to a media-button key event, which many players still honour.
+     */
     private fun send(
         controller: MediaController,
         action: Long,
@@ -169,8 +189,10 @@ class VibeCommandExecutor(
     ) {
         val actions = controller.playbackState?.actions ?: 0L
         if ((actions and action) != 0L) {
+            VibeDiagnostics.log("player", "Sent via transport control")
             transport(controller.transportControls)
         } else {
+            VibeDiagnostics.log("player", "Action not advertised; sent media key $keyCode")
             controller.dispatchMediaButtonEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
             controller.dispatchMediaButtonEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
         }

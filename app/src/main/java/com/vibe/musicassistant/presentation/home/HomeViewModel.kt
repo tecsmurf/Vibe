@@ -1,6 +1,8 @@
 package com.vibe.musicassistant.presentation.home
 
 import android.app.Application
+import android.os.Build
+import android.speech.SpeechRecognizer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vibe.musicassistant.VibeApplication
@@ -10,6 +12,7 @@ import com.vibe.musicassistant.domain.model.VoiceCommand
 import com.vibe.musicassistant.domain.model.VoiceLanguage
 import com.vibe.musicassistant.domain.model.VoiceStatus
 import com.vibe.musicassistant.domain.model.VibePermission
+import com.vibe.musicassistant.service.VibeDiagnostics
 import com.vibe.musicassistant.service.VibeRuntime
 import com.vibe.musicassistant.service.overlay.VibeOverlayService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +51,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    /** Snapshot of the phone and VIBE state for the Diagnostics screen. Holds no personal data. */
+    fun diagnosticsSummary(): String {
+        permissions.value = app.permissions.snapshot()
+        val current = state.value
+        val version = runCatching {
+            @Suppress("DEPRECATION")
+            app.packageManager.getPackageInfo(app.packageName, 0).versionName
+        }.getOrNull() ?: "?"
+        val perms = permissions.value.joinToString(", ") { "${it.permission.name}=${if (it.granted) "yes" else "NO"}" }
+        return buildString {
+            appendLine("VIBE $version · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("Permissions: $perms")
+            appendLine("Speech recognizer available: ${SpeechRecognizer.isRecognitionAvailable(app)}")
+            appendLine("Assistant on: ${current?.settings?.assistantEnabled} · orb service running: ${VibeRuntime.serviceRunning.value}")
+            appendLine("Hey VIBE switch: ${current?.settings?.wakeWordEnabled} · model: ${current?.wakeModel?.javaClass?.simpleName} (ready=${app.wakeModel.isReady()})")
+            appendLine("Language: ${current?.settings?.voiceLanguage}")
+            append("Media sessions: ${app.mediaRepository.describeSessions()}")
+        }
+    }
+
+    fun diagnosticsText(): String = diagnosticsSummary() + "\n\n" + VibeDiagnostics.asText()
+
+    fun clearDiagnostics() = VibeDiagnostics.clear()
 
     /** Returns false (and does nothing) when a required permission is still missing. */
     fun activate(): Boolean {

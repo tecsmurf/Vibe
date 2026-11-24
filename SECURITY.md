@@ -25,7 +25,7 @@ file lists what is covered and what is left.
 | Intents | All internal intents are explicit. All `PendingIntent`s are `FLAG_IMMUTABLE` and target VIBE's own components. The launcher activity reads no extras. |
 | Task hijacking | `taskAffinity=""` on the activity. |
 | Tapjacking | Other apps' overlays are hidden over VIBE's screens (`setHideOverlayWindows`, Android 12+). Permission switches live in Android's own Settings, which the system protects. |
-| Microphone | Tap-to-talk uses the microphone only for one command. "Hey VIBE" is opt-in, runs on-device with a 5-phrase grammar, and keeps Android's microphone indicator and a notification visible. No audio or transcripts are stored or logged. |
+| Microphone | Tap-to-talk uses the microphone only for one command. "Hey VIBE" is opt-in, runs on-device with a 5-phrase grammar, and keeps Android's microphone indicator and a notification visible. No audio is stored. Transcripts are never written to disk or logcat; the Diagnostics screen keeps the last 150 events (including heard text) in memory only, wiped when the app process ends or on Clear. Copying it marks the clipboard item sensitive (Android 13+). |
 | Network | HTTPS only (`cleartextTrafficPermitted=false`), system CAs only (user-installed CAs are not trusted). |
 | Model download | HTTPS, size-capped (80 MB download / 200 MB unpacked), SHA-256 pinned, unzipped with path-traversal ("Zip Slip") checks, stored in no-backup app storage. |
 | Backups | `allowBackup=false`, and data-extraction rules exclude everything from cloud backup and device transfer. |

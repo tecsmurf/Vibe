@@ -2,6 +2,7 @@ package com.vibe.musicassistant.service.voice
 
 import android.os.Handler
 import android.os.Looper
+import com.vibe.musicassistant.service.VibeDiagnostics
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
@@ -26,6 +27,7 @@ class VibeWakeWordEngine(private val modelPath: String) {
         if (model == null) model = Model(modelPath)
         true
     } catch (e: Throwable) {
+        VibeDiagnostics.log("wake", "Model error: ${e.javaClass.simpleName} ${e.message}")
         false
     }
 
@@ -43,11 +45,13 @@ class VibeWakeWordEngine(private val modelPath: String) {
                 override fun onResult(hypothesis: String?) = check(hypothesis, "text", onWake)
                 override fun onFinalResult(hypothesis: String?) = check(hypothesis, "text", onWake)
                 override fun onError(exception: Exception?) {
+                    VibeDiagnostics.log("wake", "Audio error: ${exception?.message}")
                     handler.post { stop() }
                 }
                 override fun onTimeout() = Unit
             })
         } catch (e: Exception) {
+            VibeDiagnostics.log("wake", "Start failed: ${e.javaClass.simpleName} ${e.message}")
             stop()
             false
         }
@@ -56,6 +60,7 @@ class VibeWakeWordEngine(private val modelPath: String) {
     private fun check(hypothesis: String?, key: String, onWake: () -> Unit) {
         if (triggered || hypothesis.isNullOrBlank()) return
         val text = runCatching { JSONObject(hypothesis).optString(key) }.getOrDefault("")
+        if (key == "text" && text.isNotBlank() && text != "[unk]") VibeDiagnostics.log("wake", "Heard: \"$text\"")
         if (isWakePhrase(text)) {
             triggered = true
             handler.post {
