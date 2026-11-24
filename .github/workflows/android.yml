@@ -68,3 +68,17 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
+
+  wake-model-vocab:
+    # Diagnostic: is "vibe" in the offline model's vocabulary?
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - run: |
+          curl -sSfL -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+          unzip -q model.zip
+          find vosk-model-small-en-us-0.15 -maxdepth 2 | sort
+          for w in vibe vibes hey hello hi okay wipe vive vybe; do
+            if grep -rqaw "$w" vosk-model-small-en-us-0.15/graph; then echo "FOUND $w"; else echo "MISSING $w"; fi
+          done
+          ls -la vosk-model-small-en-us-0.15/graph || true
